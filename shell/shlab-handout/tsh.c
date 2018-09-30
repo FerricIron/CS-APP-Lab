@@ -188,11 +188,7 @@ void eval(char *cmdline)
         if((pid=fork())==0)
         {
             setpgid(0,0);
-            //this is a magic line
-            //this line cause stp SIG WA
             sigprocmask(SIG_SETMASK,&prev_one,NULL);
-
-            //
             if(execve(argv[0],argv,environ)<0)
             {
                 printf("%s: Command not found.\n",argv[0]);
@@ -297,6 +293,11 @@ int builtin_cmd(char **argv)
  * do_bgfg - Execute the builtin bg and fg commands
  */
 void do_bgfg(char **argv) {
+    if(argv[1]==NULL)
+    {
+        printf("fg command requires PID or %%jobid argument\n");
+        return ;
+    }
     char *id=argv[1];
     int len=strlen(id);
     int idFlag=0;
@@ -416,7 +417,19 @@ void sigchld_handler(int sig) {
         global_pid = fgpid(jobs);
         return ;
     }
+    /*
     if(!(WIFSTOPPED(status)||WIFCONTINUED(status))) {
+    }else
+    {
+        sigtstp_handler(-pid);
+    }*/
+    if(WIFSTOPPED(status))
+    {
+        sigtstp_handler(-pid);
+    }else if(WIFSIGNALED(status))
+    {
+        sigint_handler(-pid);
+    }else if(WIFEXITED(status)) {
         sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
         deletejob(jobs, pid);
         sigprocmask(SIG_SETMASK, &prev_all, NULL);
@@ -438,8 +451,7 @@ void sigint_handler(int sig)
     pid_t pid=fgpid(jobs);//default return 0
     int jid=pid2jid(pid);
     if(pid!=0) {
-        if (pid == sig) {
-            printf("sigint_handler:This is a test Line\n");
+        if (pid == -sig) {
             printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(-sig),-sig,2);
             sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
             deletejob(jobs, pid);
@@ -468,7 +480,6 @@ void sigtstp_handler(int sig)
     int jid=pid2jid(pid);
     if(pid!=0)
     {
-        printf("STP:pid=%d\n",pid);
         if(sig==20)
         {
             printf("Job [%d] (%d) stopped by signal %d\n",jid,pid,sig);
@@ -477,7 +488,6 @@ void sigtstp_handler(int sig)
 
         }else if(pid==-sig)
         {
-            printf("sigtstp_handler: This is a test Line\n");
             printf("Job [%d] (%d) stopped by signal %d\n",jid,pid,20);
             getjobpid(jobs,pid)->state=ST;
         }
