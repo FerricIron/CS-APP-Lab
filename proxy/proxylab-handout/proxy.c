@@ -3,12 +3,12 @@
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
-
+#define 	MAX_TYPE_SIZE     4
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
-static const char *user_connection="Connection: close";
-static const char *user_proxy_connection="Proxy-Connection: close";
-static const char *user_host="Host: www.cmu.edu";
+static const char *user_connection="Connection: close\r\n";
+static const char *user_proxy_connection="Proxy-Connection: close\r\n";
+static const char *user_host="Host: www.cmu.edu\r\n";
 typedef struct {
 	char user_agent_hdr[MAXLINE];
 	char user_connection[MAXLINE];
@@ -20,6 +20,8 @@ void PrintErrorHeader(int fd,char status[],char* shortMsg);
 void ServerError(int fd, char *cause, char status[], char *shortMsg, char *longMsg);
 void ServerPrintResponseHeader(char *header);
 int getRequestType(char *buf);
+void initHeader(Headers* header);
+void GetRequestHeaders(rio_t *rio,char requestHeaders[],Headers *header);
 int main(int argc,char **argv)
 {
     //printf("%s", user_agent_hdr);
@@ -35,8 +37,8 @@ int main(int argc,char **argv)
     listenfd=Open_listenfd(argv[1]);
     while(1)
     {
-    	clientlen=sizeof(clientaddr);
-    	connfd=Accept(listenfd,&clientaddr,clientlen);
+    	clientlen=sizeof(struct sockaddr_storage);
+    	connfd=Accept(listenfd,(SA *)&clientaddr,&clientlen);
     	Getnameinfo((SA *)&clientaddr,clientlen,hostname,MAXLINE,port,MAXLINE,0);
     	fprintf(stdout, "Accept: (%s,%s)\n",hostname,port);
     	todo(connfd);
@@ -46,21 +48,53 @@ int main(int argc,char **argv)
 }
 void todo(int fd)
 {
-	rio_t rio;
+	rio_t rio,rioc;
+	int rc;
 	char buf[MAXLINE],method[MAXLINE],uri[MAXLINE],version[MAXLINE];
+	char hostname[MAXLINE],port[MAXLINE],temp[MAXLINE];
 	Rio_readinitb(&rio,fd);
 	Rio_readlineb(&rio,buf,MAXLINE);
-	fprintf(stdout, "Header:%s\n",buf);
 	sscanf(buf,"%s %s %s",method,uri,version);
+//	fprintf(stdout, "%s\n",buf );
+//	printf("here\n");
 	if(strcasecmp(method,"GET"))
 	{
 		ServerError(fd,method,"501","Not implemented","ProxyLab not implement this method\n");
 	}
+	sprintf(buf,"%s %s %s",method,uri,"HTTP/1.0\r\n");
+	//printf("here\n");
+	Headers header;
+	GetRequestHeaders(&rio,buf,&header);
+//	fprintf(stdout, "%s\n",buf );
+	sscanf(header.user_host,"%s %s",temp,hostname);
+	char *ptr=strchr(hostname,':');
+	if(ptr!=NULL){
+		strcpy(port,ptr+1);
+		*ptr='\0';
+	}else
+	{
+		strcpy(port,"80");
+	}
+	//fprintf(stdout, "%s:%s\n",hostname,port);
+	int connfd=Open_clientfd(hostname,port);
+	//fprintf(stdout, "%d\n",connfd );
+	if(connfd<0)
+	{
+		ServerError(fd,method,"500","Can not Connection","Proxy Can't connection to end server\n");
+	}
+	Rio_writen(connfd,buf,MAXLINE);
+	//fprintf(stdout,"requestHeaders:%s",buf);
+	Rio_readinitb(&rioc,connfd);
+	while((rc=Rio_readlineb(&rioc,buf,MAXLINE))>0)
+	{
+		//fprintf(stdout, "Response:%s\n",buf );
+		Rio_writen(fd,buf,MAXLINE);
+	}
+	return ;
 }
 int getRequestType(char *buf)
 {
-	const static int MAX_TYPE_SIZE=4;
-	const static char type[MAX_TYPE_SIZE][MAXLINE]={"Host","User-Agent","Connection","Proxy-Connection"};
+	const static char type[MAX_TYPE_SIZE][MAXLINE]={"Host:","User-Agent:","Connection:","Proxy-Connection:"};
 	for(int i=0;i<MAX_TYPE_SIZE;++i)
 	{
 		if(strcasecmp(buf,type[i])==0)
@@ -70,27 +104,42 @@ int getRequestType(char *buf)
 	}
 	return -1;
 }
-void GetRequestHeaders(rio_t &rio,char headers[MAXLINE])
+void initHeader(Headers* header)
 {
-	char buf[MAXLINE],type[MAXLINE],value[MAXLINE];
-	headers[0]='\0';
+	strcpy(header->user_agent_hdr,user_agent_hdr);
+	strcpy(header->user_connection,user_connection);
+	strcpy(header->user_proxy_connection,user_proxy_connection);
+	strcpy(header->user_host,user_host);
+}
+void GetRequestHeaders(rio_t *rio,char requestHeaders[],Headers *header)
+{
+	char buf[MAXLINE],type[MAXLINE];
 	int rc,tc;
-	int vis[4]={0};
-	while(rc=Rio_readlineb(&rio,buf,MAXLINE)&&(rc!=0||rc!=-1))
+	initHeader(header);
+	while((rc=Rio_readlineb(rio,buf,MAXLINE))>0)
 	{
-		sscanf(buf,"%s: %s",type,value);
+		if(strcmp(buf,"\r\n")==0)
+		{
+			break;
+		}
+		sscanf(buf,"%s",type);
 		tc=getRequestType(type);
+		//fprintf(stdout, "%s",buf );
 		switch(tc)
 		{
-			case -1:
-			case 0:vis[0]=1;
+			case -1:strcat(requestHeaders,buf);break;
+			case 0:strcpy(header->user_host,buf);
 			case 1:
 			case 2:
 			case 3:
+				break;
 		}
 	}
-
-
+	strcat(requestHeaders,header->user_agent_hdr);
+	strcat(requestHeaders,header->user_connection);
+	strcat(requestHeaders,header->user_proxy_connection);
+	strcat(requestHeaders,header->user_host);
+	strcat(requestHeaders,"\r\n");
 }
 
 
