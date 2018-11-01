@@ -223,7 +223,7 @@ void* todo(void *vargp)
 		fprintf(stdout,"ProxyCache: %s  Cached\n",url);
 		fprintf(stdout,"ProxyCacheBuf:size=%d\n%s\n",cache.cacheItem[ci].size,cache.cacheItem[ci].cache);
 		Rio_writen(fd,cache.cacheItem[ci].cache,cache.cacheItem[ci].size);
-
+		cache.cacheItem[ci].useTime=time(NULL);
 		P(&cache.cacheItem[ci].mutex);
 		cache.cacheItem[ci].readcnt--;
 		if(cache.cacheItem[ci].readcnt==0)
